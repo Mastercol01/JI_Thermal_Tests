@@ -21,7 +21,7 @@ bool RtDataRelevant  = true;
 #define DHTPIN 3
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
-const int NUM_THdht_MEMORY = 3;
+const int NUM_THdht_MEMORY = 2;
 
 float Tdht;
 float Hdht;
@@ -50,8 +50,8 @@ void updateTHdht_memory(){
 
 void updateTHdht_nanmean(){
 
-  int sum1 = 0;
-  int sum2 = 0;
+  float sum1 = 0;
+  float sum2 = 0;
   int count1 = 0;
   int count2 = 0;
 
@@ -82,10 +82,10 @@ void updateTHdht_nanmean(){
 
 const int NUM_RT_PINS          = 5;
 const int RT_PINS[NUM_RT_PINS] = {A2, A3, A4, A5, A6};
-float     R1[NUM_RT_PINS]      = {31700, 31280, 31860, 31580, 31265};
-const int NUM_Tt_MEMORY        = 3;
+float     R1[NUM_RT_PINS]      = {31700.0, 31280.0, 31860.0, 31580.0, 31265.0};
+const int NUM_Tt_MEMORY        = 10;
 
-float Vcc = 5;
+float Vcc = 5.0;
 float Rt[NUM_RT_PINS];
 float Vt[NUM_RT_PINS];
 float Tt[NUM_RT_PINS];
@@ -130,7 +130,7 @@ void updateTt_memory(){
 void updateTt_nanmean(){
   for(int j=0; j<NUM_RT_PINS; j++){
 
-    int sum = 0;
+    float sum = 0;
     int count = 0;
     for(int i=0; i<NUM_Tt_MEMORY; i++){
       if (!isnan(Tt_memory[i][j])) {
