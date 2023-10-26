@@ -11,8 +11,8 @@ uint32_t initialTime;
 uint32_t sendDataTimer;
 uint32_t sendDataTimeout = 1000;
 
-bool canDataRelevant = false;
-bool dhtDataRelevant = false;
+bool canDataRelevant = true;
+bool dhtDataRelevant = true;
 bool RtDataRelevant  = true;
 
 
@@ -125,6 +125,7 @@ MCP2515 mcp2515(10);
 float batteryVoltage = NAN;
 float batteryCurrent = NAN;
 float batterySOC = NAN;
+float NTC[7] =  {NAN, NAN, NAN, NAN, NAN, NAN, NAN};
 
 void readUpdateBatteryData(){
   if (mcp2515.readMessage(&canMsg) == MCP2515::ERROR_OK) {
@@ -132,6 +133,17 @@ void readUpdateBatteryData(){
       batteryVoltage = 0.1*(  (canMsg.data[1] << 8) | canMsg.data[0]);
       batteryCurrent = 0.1*( ((canMsg.data[3] << 8) | canMsg.data[2]) - 32000);
       batterySOC     = 1.0*canMsg.data[4];
+      
+    }else if(canMsg.can_id == 2550834945){
+      NTC[1] = canMsg.data[4] - 40;
+      NTC[2] = canMsg.data[5] - 40;
+      NTC[3] = canMsg.data[6] - 40;
+      NTC[4] = canMsg.data[7] - 40;
+      
+    }else if(canMsg.can_id == 2550900481){
+      NTC[5] = canMsg.data[0] - 40;
+      NTC[6] = canMsg.data[1] - 40;
+      NTC[0] = canMsg.data[2] - 40;
     }
   }
 }
@@ -147,6 +159,7 @@ void excelSetup(){
 
   if(canDataRelevant){
     setupString = setupString + ",V,I,Soc";} 
+    for(int i=0; i<6; i++){setupString = setupString + ",NTC" + i;}
 
   if(dhtDataRelevant){
     setupString = setupString + ",Tdht,Hdht";}
@@ -171,6 +184,7 @@ void sendData(){
     dataString = dataString + "," + batteryVoltage;
     dataString = dataString + "," + batteryCurrent;
     dataString = dataString + "," + batterySOC;
+    for(int i=0; i<6; i++){dataString = dataString + "," + NTC[i];}
   }
 
   if(dhtDataRelevant){
