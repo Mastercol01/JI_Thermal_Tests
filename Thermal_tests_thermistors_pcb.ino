@@ -7,20 +7,20 @@
 // (1)-------------- GENERAL SET-UP --------------(1)
 uint32_t initialTime;
 uint32_t sendDataTimer;
-uint32_t sendDataTimeout = 1000;
+uint32_t sendDataTimeout = 1500;
 
 Adafruit_ADS1115 ads;                    /* Use this for the 16-bit version */
 const float MULTIPLIER = 0.03125*1e-3;   // for ads.setGain(GAIN_FOUR);   // 4x gain   +/- 1.024V  1 bit = 0.03125mV (ADS1115)
-const float FACTOR     = 20;             // 20A/1V from the current transformer
+const float FACTOR     = 25;             // 20A/1V from the current transformer
 
-bool RtDataRelevant   = false;
-bool IrmsDataRelevant = true;
+bool RtDataRelevant   = true;
+bool IrmsDataRelevant = false;
 
 const int NUM_PCBS    = 4;
-const int NUM_THERMS  = 16;
+const int NUM_THERMS  = 14;
 
 
-const float Vcc[NUM_PCBS]            = {5.013, 5.013, 5.013, 5.013};
+const float Vcc[NUM_PCBS]            = {5.013, 4.98, 5.013, 5.013};
 
 const float R1[NUM_PCBS][NUM_THERMS] = {{33100, 33150, 33180, 33070, 33010, 33050, NAN,   NAN,   NAN,   NAN,   NAN,   NAN,   NAN,   NAN},
                                         {33990, 32850, 32350, 32480, 32720, 33160, 32710, 33130, 33040, 32710, 32730, 32700, 33240, 33010},
@@ -28,7 +28,7 @@ const float R1[NUM_PCBS][NUM_THERMS] = {{33100, 33150, 33180, 33070, 33010, 3305
                                         {33110, 32670, 33030, 33220, 32480, 32440, 32850, 33010, 33040, 32950, 32700, 32760, 32980, 32620}};
 
 const float RT_PINS[NUM_PCBS][NUM_THERMS] = {{A0, A1, A2, A3, A4, A5, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN},
-                                             {A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13},
+                                             {NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, A12, A13},
                                              {A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13},
                                              {A0, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, A13}};
 
@@ -42,10 +42,8 @@ float Tt[NUM_THERMS] = {NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, N
 
 
 // (2)-------------- SPECIFIC SET-UP --------------(2)
-const int NUM_PCB = 0;
-const int NUM_AVGS = 30;
-const int NUM_AVGS2 = 5;
-
+const int NUM_PCB = 1;
+const int NUM_AVGS = 20;
 
 
 // (3)-------------- THERMISTOR SENSOR FUNCS --------------(3)
@@ -56,7 +54,8 @@ void readUpdate_V1_Vt_I_Rt(){
 
     V1[i] = 0;
     for(int j=0; j<NUM_AVGS; j++){
-      V1[i] += analogRead(RT_PINS[i]);}
+      V1[i] += analogRead(RT_PINS[NUM_PCB][i]);
+    }
 
     V1[i] *= (Vcc[NUM_PCB]/1023)/NUM_AVGS;
     Vt[i]  = Vcc[NUM_PCB] - V1[i];
@@ -125,12 +124,7 @@ float Irms = 0;
 
 void readUpdate_SumIsq_SumIsqNumSamples_Irms(){
 
-  float bitVoltage = 0;
-  for (int j=0; j<NUM_AVGS2; j++){
-    bitVoltage += ads.readADC_Differential_0_1();    
-  }
-  
-  bitVoltage         /= NUM_AVGS2;
+  float bitVoltage    = ads.readADC_Differential_0_1();
   float voltage       = MULTIPLIER*bitVoltage;
   float current       = FACTOR*voltage;
   SumIsq             += pow(current, 2);
@@ -159,11 +153,11 @@ void excelSetup(){
   }
 
   if(RtDataRelevant){
-    for(int i=0; i<NUM_THERMS; i++){setupString = setupString + ",V1_" + "(" + NUM_PCB + "," + i + ")";}
-    for(int i=0; i<NUM_THERMS; i++){setupString = setupString + ",Vt_" + "(" + NUM_PCB + "," + i + ")";}
-    for(int i=0; i<NUM_THERMS; i++){setupString = setupString + ",I_"  + "(" + NUM_PCB + "," + i + ")";}
-    for(int i=0; i<NUM_THERMS; i++){setupString = setupString + ",Rt_" + "(" + NUM_PCB + "," + i + ")";}    
-    for(int i=0; i<NUM_THERMS; i++){setupString = setupString + ",Tt_" + "(" + NUM_PCB + "," + i + ")";}  
+    for(int i=0; i<NUM_THERMS; i++){if(!isnan(RT_PINS[NUM_PCB][i])){setupString = setupString + ",V1_" + "(" + NUM_PCB + "," + i + ")";}}
+    for(int i=0; i<NUM_THERMS; i++){if(!isnan(RT_PINS[NUM_PCB][i])){setupString = setupString + ",Vt_" + "(" + NUM_PCB + "," + i + ")";}}
+    for(int i=0; i<NUM_THERMS; i++){if(!isnan(RT_PINS[NUM_PCB][i])){setupString = setupString + ",I_"  + "(" + NUM_PCB + "," + i + ")";}}
+    for(int i=0; i<NUM_THERMS; i++){if(!isnan(RT_PINS[NUM_PCB][i])){setupString = setupString + ",Rt_" + "(" + NUM_PCB + "," + i + ")";}}    
+    for(int i=0; i<NUM_THERMS; i++){if(!isnan(RT_PINS[NUM_PCB][i])){setupString = setupString + ",Tt_" + "(" + NUM_PCB + "," + i + ")";}}  
   }
 
   Serial.println("CLEARDATA");
@@ -182,11 +176,11 @@ void sendData(){
   }
 
   if(RtDataRelevant){
-    for(int i=0; i<NUM_THERMS; i++){dataString = dataString + "," + V1[i];}
-    for(int i=0; i<NUM_THERMS; i++){dataString = dataString + "," + Vt[i];}
-    for(int i=0; i<NUM_THERMS; i++){dataString = dataString + "," + I[i];}
-    for(int i=0; i<NUM_THERMS; i++){dataString = dataString + "," + Rt[i];}
-    for(int i=0; i<NUM_THERMS; i++){dataString = dataString + "," + Tt[i];}
+    for(int i=0; i<NUM_THERMS; i++){if(!isnan(RT_PINS[NUM_PCB][i])){dataString = dataString + "," + V1[i];}}
+    for(int i=0; i<NUM_THERMS; i++){if(!isnan(RT_PINS[NUM_PCB][i])){dataString = dataString + "," + Vt[i];}}
+    for(int i=0; i<NUM_THERMS; i++){if(!isnan(RT_PINS[NUM_PCB][i])){dataString = dataString + "," + I[i];}}
+    for(int i=0; i<NUM_THERMS; i++){if(!isnan(RT_PINS[NUM_PCB][i])){dataString = dataString + "," + Rt[i];}}
+    for(int i=0; i<NUM_THERMS; i++){if(!isnan(RT_PINS[NUM_PCB][i])){dataString = dataString + "," + Tt[i];}}
   }
 
   Serial.println(dataString);
@@ -202,7 +196,7 @@ void setup() {
   for(int i=0; i<NUM_THERMS; i++){
   if(!isnan(RT_PINS[NUM_PCB][i])){
 
-    pinMode(RT_PINS[i], INPUT);
+    pinMode(RT_PINS[NUM_PCB][i], INPUT);
   }}
   
   // INITIALIZE SERIAL.
@@ -210,11 +204,13 @@ void setup() {
   while (!Serial){;}
 
   // INITIALIZE ADS1115 SENSOR.
+  if(IrmsDataRelevant){
   if (!ads.begin()){
     Serial.println("Failed to initialize ADS."); 
     while (1);
   }
-  ads.setGain(GAIN_FOUR);                          
+  ads.setGain(GAIN_FOUR); 
+  }                         
 
   // INITIALIZE TIME VARIABLES.
   initialTime   = millis();
@@ -231,11 +227,17 @@ void setup() {
 void loop() {
 
   // READ CURRENT SENSOR
-  readUpdate_SumIsq_SumIsqNumSamples_Irms();
+  if(IrmsDataRelevant){
+    readUpdate_SumIsq_SumIsqNumSamples_Irms();
+  }
+
 
   // THERMISTORS
-  readUpdate_V1_Vt_I_Rt();
-  updateTt_v1();
+  if(RtDataRelevant){
+    readUpdate_V1_Vt_I_Rt();
+    updateTt_v1();
+  }
+
 
   // SEND DATA OVER TO EXCEL
   if(millis() - sendDataTimer > sendDataTimeout){
