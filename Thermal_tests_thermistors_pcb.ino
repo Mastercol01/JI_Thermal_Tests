@@ -13,8 +13,8 @@ Adafruit_ADS1115 ads;                    /* Use this for the 16-bit version */
 const float MULTIPLIER = 0.03125*1e-3;   // for ads.setGain(GAIN_FOUR);   // 4x gain   +/- 1.024V  1 bit = 0.03125mV (ADS1115)
 const float FACTOR     = 20;             // 20A/1V from the current transformer
 
-bool RtDataRelevant   = true;
-bool IrmsDataRelevant = false;
+bool RtDataRelevant   = false;
+bool IrmsDataRelevant = true;
 
 const int NUM_PCBS    = 4;
 const int NUM_THERMS  = 16;
@@ -44,7 +44,7 @@ float Tt[NUM_THERMS] = {NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, N
 // (2)-------------- SPECIFIC SET-UP --------------(2)
 const int NUM_PCB = 0;
 const int NUM_AVGS = 30;
-
+const int NUM_AVGS2 = 5;
 
 
 
@@ -124,7 +124,13 @@ float SumIsqNumSamples = 0;
 float Irms = 0;
 
 void readUpdate_SumIsq_SumIsqNumSamples_Irms(){
-  float bitVoltage    = ads.readADC_Differential_0_1();
+
+  float bitVoltage = 0;
+  for (int j=0; j<NUM_AVGS2; j++){
+    bitVoltage += ads.readADC_Differential_0_1();    
+  }
+  
+  bitVoltage         /= NUM_AVGS2;
   float voltage       = MULTIPLIER*bitVoltage;
   float current       = FACTOR*voltage;
   SumIsq             += pow(current, 2);
