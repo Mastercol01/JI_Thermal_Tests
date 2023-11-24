@@ -1,18 +1,20 @@
 // -------------- IMPORTATION OF LIBRARIES --------------
 #include <stdio.h>     
 #include <math.h>       
-#include "DHT.h"
 #include <SPI.h>
-#include <mcp2515.h>
-
+#include <Adafruit_ADS1X15.h>
 
 // (1)-------------- GENERAL SET-UP --------------(1)
 uint32_t initialTime;
 uint32_t sendDataTimer;
 uint32_t sendDataTimeout = 1000;
 
-bool RtDataRelevant  = true;
-bool CurrentRelevant = false;
+Adafruit_ADS1115 ads;                    /* Use this for the 16-bit version */
+const float MULTIPLIER = 0.03125*1e-3;   // for ads.setGain(GAIN_FOUR);   // 4x gain   +/- 1.024V  1 bit = 0.03125mV (ADS1115)
+const float FACTOR     = 20;             // 20A/1V from the current transformer
+
+bool RtDataRelevant   = true;
+bool IrmsDataRelevant = false;
 
 const int NUM_PCBS    = 4;
 const int NUM_THERMS  = 16;
@@ -38,15 +40,17 @@ float Tt[NUM_THERMS] = {NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, NAN, N
 
 
 
+
 // (2)-------------- SPECIFIC SET-UP --------------(2)
 const int NUM_PCB = 0;
-const intNUM_AVGS = 20;
-
-// (3)-------------- SPECIFIC SET-UP --------------(3)
+const int NUM_AVGS = 30;
 
 
 
+
+// (3)-------------- THERMISTOR SENSOR FUNCS --------------(3)
 void readUpdate_V1_Vt_I_Rt(){
+
   for(int i=0; i<NUM_THERMS; i++){
   if(!isnan(RT_PINS[NUM_PCB][i])){
 
@@ -54,28 +58,11 @@ void readUpdate_V1_Vt_I_Rt(){
     for(int j=0; j<NUM_AVGS; j++){
       V1[i] += analogRead(RT_PINS[i]);}
 
-    V1 *= Vcc[NUM_PCB]
-    
+    V1[i] *= (Vcc[NUM_PCB]/1023)/NUM_AVGS;
+    Vt[i]  = Vcc[NUM_PCB] - V1[i];
+    I[i]   = V1[i]/R1[NUM_PCB][i];
+    Rt[i]  = Vt[i]/I[i];
    }}
-
-   
-
-
-  
-  for(int i=0; i<NUM_RT_PINS; i++){
-    Vt[i] = 0;
-    for(int j=0; j<NUM_Tt_AVGS; j++){
-      Vt[i] += analogRead(RT_PINS[i]);
-      }
-      Vt[i] /= NUM_Tt_AVGS;
-      Vt[i] = Vcc*Vt[i]/1023.0;
-  }
-}
-
-void updateRt(){
-  for(int i=0; i<NUM_RT_PINS; i++){
-    Rt[i] = R1[i]*Vt[i]/(Vcc - Vt[i]);
-  }
 }
 
 
@@ -87,11 +74,14 @@ void updateTt_v1(){
   float D = -0.007982876975644648;
   float E = -0.0019710091731159445;
 
-  for(int i=0; i<NUM_RT_PINS; i++){
-  lnRt = log(Rt[i]);
-  Tt[i] = A + B*lnRt + C*pow(lnRt,2) + D*pow(lnRt,3) + E*pow(lnRt,4);
-  }
+  for(int i=0; i<NUM_THERMS; i++){
+  if(!isnan(RT_PINS[NUM_PCB][i])){
+
+    lnRt = log(Rt[i]);
+    Tt[i] = A + B*lnRt + C*pow(lnRt,2) + D*pow(lnRt,3) + E*pow(lnRt,4);
+  }}
 }
+
 
 void updateTt_v2(){
   float lnRt;
@@ -99,13 +89,16 @@ void updateTt_v2(){
   float A  =  0.00211513;
   float B  =  0.000281579;
   float C  = -6.2803*pow(10,-7);
-  
-  for(int i=0; i<NUM_RT_PINS; i++){
-  lnRt       = log(Rt[i]/1000);
-  Tt_inverse = A + B*lnRt + C*pow(lnRt,3);
-  Tt[i]      = 1/Tt_inverse - 273.15;
-  }
+
+  for(int i=0; i<NUM_THERMS; i++){
+  if(!isnan(RT_PINS[NUM_PCB][i])){
+
+    lnRt       = log(Rt[i]/1000);
+    Tt_inverse = A + B*lnRt + C*pow(lnRt,3);
+    Tt[i]      = 1/Tt_inverse - 273.15;
+  }}
 }
+
 
 void updateTt_v3(){
   float Tt_inverse;
@@ -113,44 +106,37 @@ void updateTt_v3(){
   float T0 = 25 + 273.15;
   float R0 = 100000;
 
-  
-  for(int i=0; i<NUM_RT_PINS; i++){
-  Tt_inverse = 1/T0 + 1/B*log(Rt[i]/R0);
-  Tt[i]      = 1/Tt_inverse - 273.15;
-  }
+  for(int i=0; i<NUM_THERMS; i++){
+  if(!isnan(RT_PINS[NUM_PCB][i])){
+
+    Tt_inverse = 1/T0 + 1/B*log(Rt[i]/R0);
+    Tt[i]      = 1/Tt_inverse - 273.15;
+  }}
 }
 
 
 
-// (4)-------------- CAN SET-UP --------------(4)
-struct can_frame canMsg;
-MCP2515 mcp2515(10);
 
-float batteryVoltage = NAN;
-float batteryCurrent = NAN;
-float batterySOC = NAN;
-float NTC[7] =  {NAN, NAN, NAN, NAN, NAN, NAN, NAN};
 
-void readUpdateBatteryData(){
+// (4)-------------- CURRENT TRANSFORMER FUNCS --------------(4)
+float SumIsq = 0;
+float SumIsqNumSamples = 0;
+float Irms = 0;
 
-  if (mcp2515.readMessage(&canMsg) == MCP2515::ERROR_OK) {
-    if(canMsg.can_id == 2550245121){
-      batteryVoltage = 0.1*(  (canMsg.data[1] << 8) | canMsg.data[0]);
-      batteryCurrent = 0.1*( ((canMsg.data[3] << 8) | canMsg.data[2]) - 32000);
-      batterySOC     = 1.0*canMsg.data[4];
-      
-    }else if(canMsg.can_id == 2550834945){
-      NTC[1] = canMsg.data[4] - 40;
-      NTC[2] = canMsg.data[5] - 40;
-      NTC[3] = canMsg.data[6] - 40;
-      NTC[4] = canMsg.data[7] - 40;
-      
-    }else if(canMsg.can_id == 2550900481){
-      NTC[5] = canMsg.data[0] - 40;
-      NTC[6] = canMsg.data[1] - 40;
-      NTC[0] = canMsg.data[2] - 40;
-    }
-  }
+void readUpdate_SumIsq_SumIsqNumSamples_Irms(){
+  float bitVoltage    = ads.readADC_Differential_0_1();
+  float voltage       = MULTIPLIER*bitVoltage;
+  float current       = FACTOR*voltage;
+  SumIsq             += pow(current, 2);
+  SumIsqNumSamples   += 1;
+  Irms                = sqrt(SumIsq/SumIsqNumSamples);
+}
+
+
+void reset_SumIsq_SumIsqNumSamples_Irms(){
+  SumIsq = 0;
+  SumIsqNumSamples = 0;
+  Irms = 0;
 }
 
 
@@ -162,17 +148,16 @@ void excelSetup(){
 
   String setupString = "LABEL, Date, Time, Milliseconds";
 
-  if(canDataRelevant){
-    setupString = setupString + ",V,I,Soc";} 
-    for(int i=0; i<6; i++){setupString = setupString + ",NTC" + i;}
-
-  if(dhtDataRelevant){
-    setupString = setupString + ",Tdht,Hdht";}
+  if(IrmsDataRelevant){
+    setupString = setupString + ",Irms";
+  }
 
   if(RtDataRelevant){
-    for(int i=0; i<NUM_RT_PINS; i++){setupString = setupString + ",Vt" + i;}
-    for(int i=0; i<NUM_RT_PINS; i++){setupString = setupString + ",Rt" + i;}
-    for(int i=0; i<NUM_RT_PINS; i++){setupString = setupString + ",Tt" + i;}    
+    for(int i=0; i<NUM_THERMS; i++){setupString = setupString + ",V1_" + "(" + NUM_PCB + "," + i + ")";}
+    for(int i=0; i<NUM_THERMS; i++){setupString = setupString + ",Vt_" + "(" + NUM_PCB + "," + i + ")";}
+    for(int i=0; i<NUM_THERMS; i++){setupString = setupString + ",I_"  + "(" + NUM_PCB + "," + i + ")";}
+    for(int i=0; i<NUM_THERMS; i++){setupString = setupString + ",Rt_" + "(" + NUM_PCB + "," + i + ")";}    
+    for(int i=0; i<NUM_THERMS; i++){setupString = setupString + ",Tt_" + "(" + NUM_PCB + "," + i + ")";}  
   }
 
   Serial.println("CLEARDATA");
@@ -181,26 +166,21 @@ void excelSetup(){
   Serial.println("RESETTIMER");
 }
 
+
 void sendData(){
   String dataString = "DATA,DATE,TIME";
   dataString = dataString + "," + (millis() - initialTime);
 
-  if(canDataRelevant){
-    dataString = dataString + "," + batteryVoltage;
-    dataString = dataString + "," + batteryCurrent;
-    dataString = dataString + "," + batterySOC;
-    for(int i=0; i<6; i++){dataString = dataString + "," + NTC[i];}
-  }
-
-  if(dhtDataRelevant){
-    dataString = dataString + "," + Tdht; 
-    dataString = dataString + "," + Hdht; 
+  if(IrmsDataRelevant){
+    dataString = dataString + "," + Irms;
   }
 
   if(RtDataRelevant){
-    for(int i=0; i<NUM_RT_PINS; i++){dataString = dataString + "," + Vt[i];}
-    for(int i=0; i<NUM_RT_PINS; i++){dataString = dataString + "," + Rt[i];}
-    for(int i=0; i<NUM_RT_PINS; i++){dataString = dataString + "," + Tt[i];}
+    for(int i=0; i<NUM_THERMS; i++){dataString = dataString + "," + V1[i];}
+    for(int i=0; i<NUM_THERMS; i++){dataString = dataString + "," + Vt[i];}
+    for(int i=0; i<NUM_THERMS; i++){dataString = dataString + "," + I[i];}
+    for(int i=0; i<NUM_THERMS; i++){dataString = dataString + "," + Rt[i];}
+    for(int i=0; i<NUM_THERMS; i++){dataString = dataString + "," + Tt[i];}
   }
 
   Serial.println(dataString);
@@ -211,22 +191,24 @@ void sendData(){
 
 
 void setup() {
-  // SET THERMISTOR PINS TO INPUT.
-  
-  for(int i=0; i<NUM_RT_PINS; i++){
-    pinMode(RT_PINS[i], INPUT);
-  }
 
-  // INITIALIZE SERIAL AND DHT SENSOR.
+  // SET THERMISTOR PINS TO INPUT.
+  for(int i=0; i<NUM_THERMS; i++){
+  if(!isnan(RT_PINS[NUM_PCB][i])){
+
+    pinMode(RT_PINS[i], INPUT);
+  }}
+  
+  // INITIALIZE SERIAL.
   Serial.begin(9600);
   while (!Serial){;}
-  dht.begin();
 
-  // INITIALIZE CAN MODULE
-  mcp2515.reset();
-  mcp2515.setBitrate(CAN_250KBPS, MCP_8MHZ);
-  mcp2515.setNormalMode();
-
+  // INITIALIZE ADS1115 SENSOR.
+  if (!ads.begin()){
+    Serial.println("Failed to initialize ADS."); 
+    while (1);
+  }
+  ads.setGain(GAIN_FOUR);                          
 
   // INITIALIZE TIME VARIABLES.
   initialTime   = millis();
@@ -239,25 +221,21 @@ void setup() {
 
 
 
+
 void loop() {
 
-  // BATTERY CAN DATA
-  readUpdateBatteryData();
-  
-  // DHT SENSOR
-  readUpdateTHdht();
+  // READ CURRENT SENSOR
+  readUpdate_SumIsq_SumIsqNumSamples_Irms();
 
   // THERMISTORS
-  readUpdateVt();
-  updateRt();
+  readUpdate_V1_Vt_I_Rt();
   updateTt_v1();
-
 
   // SEND DATA OVER TO EXCEL
   if(millis() - sendDataTimer > sendDataTimeout){
     sendData();
+    reset_SumIsq_SumIsqNumSamples_Irms();
     sendDataTimer = millis();
-    }
-
-    
   }
+
+}
